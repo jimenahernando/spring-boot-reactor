@@ -3,6 +3,8 @@ package com.jimenahernando.springbootreactor;
 import com.jimenahernando.springbootreactor.models.Comentarios;
 import com.jimenahernando.springbootreactor.models.Usuario;
 import com.jimenahernando.springbootreactor.models.UsuarioComentarios;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -11,8 +13,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.CountDownLatch;
 
 @SpringBootApplication
 public class Application implements CommandLineRunner {
@@ -24,7 +30,7 @@ public class Application implements CommandLineRunner {
     }
 
     @Override
-    public void run(String... args) {
+    public void run(String... args) throws Exception {
 //        primerEjemplo();
 //        primerEjemploReducido();
 //        ejemploConTareaEnSuscribe();
@@ -41,7 +47,14 @@ public class Application implements CommandLineRunner {
 //        ejemploConvertirAMono();
 //        ejemploCombinarFlujos();
 //        ejemploCombinarConZipWith();
-        ejemploCombinarConZipWith2();
+//        ejemploCombinarConZipWith2();
+//        ejemploZipWithyRange();
+//        ejemploZipWithEInterval();
+//        ejemploDelayElements();
+//        ejemploIntervaloInfinito();
+//        ejemploCrearObservableFlux();
+//        ejemploContrapresion();
+        ejemploContrapresionLimitRate();
     }
 
     private void primerEjemplo() {
@@ -409,8 +422,163 @@ public class Application implements CommandLineRunner {
                 .map(tupla -> {
                     Usuario u = tupla.getT1();
                     Comentarios c = tupla.getT2();
-                    return new UsuarioComentarios(u,c);
+                    return new UsuarioComentarios(u, c);
                 });
         usuariosComentarios.subscribe(uc -> log.info(uc.toString()));
+    }
+
+    private void ejemploZipWithyRange() {
+        Flux.just(1, 2, 3, 4)
+                .map(e -> (e * 2))
+                .zipWith(Flux.range(0, 4), (uno, dos) -> String.format("Primer flux: %d Segundo flux: %d", uno, dos))
+                .subscribe(texto -> log.info(texto));
+
+        Flux<Integer> rango = Flux.range(0, 4);
+        Flux.just(1, 2, 3, 4)
+                .map(e -> (e * 2))
+                .zipWith(rango, (uno, dos) -> String.format("Primer flux: %d Segundo flux: %d", uno, dos))
+                .subscribe(texto -> log.info(texto));
+    }
+
+    private void ejemploZipWithEInterval() {
+        // no se visualiza porque sigue ejecutandose en otro hilo,
+        // justamente la programacion reactiva no bloquea, sigue ejecutandose en segundo plano
+/*        Flux<Integer> rango = Flux.range(1,12);
+        Flux<Long> retraso = Flux.interval(Duration.ofSeconds(1));
+        rango.zipWith(retraso, (ran, ret)-> ran)
+                .doOnNext(i -> log.info(i.toString()))
+                .subscribe();*/
+
+        // para verlo, que se bloquee, auqnue no tiene ningun sentido
+        // podemos hacer lo siguiente FORZAR EL BLOQUEO y se desbloquea cuando termina
+        Flux<Integer> rango1 = Flux.range(1, 4);
+        Flux<Long> retraso1 = Flux.interval(Duration.ofSeconds(1));
+        rango1.zipWith(retraso1, (ran, ret) -> ran)
+                .doOnNext(i -> log.info(i.toString()))
+                .blockLast();
+    }
+
+    private void ejemploDelayElements() throws InterruptedException {
+        //otra forma de aplicar intervalo de tiempos, mucho mas simple
+        Flux<Integer> rango = Flux.range(1, 12)
+                .delayElements(Duration.ofSeconds(1))
+                .doOnNext(i -> log.info(i.toString()));
+
+        rango.subscribe();
+
+        // bloquea hasta que se haya emitido el ultimo elemento
+        // no es recomendable ya que puede generar cuellos de botella
+        // aca lo estamos utilizando para verlo por consola
+        //rango.blockLast();
+
+        // para hacer una pausa en milisegundos
+        Thread.sleep(13000);
+    }
+
+    private void ejemploIntervaloInfinito() throws InterruptedException {
+        // para verlo por consola tenemos que bloquear
+        // vamos a bloquearlo de otra forma utilizando un contador
+        // comienza en 1 y tienen que decrementar a 0 y cuando
+        // llegue a 0 liberara el hilo
+        CountDownLatch latch = new CountDownLatch(1);
+
+        Flux.interval(Duration.ofSeconds(1))
+                // para decrementar
+                .doOnTerminate(() -> latch.countDown()) //latch::countDown
+                .flatMap(i -> {
+                    if (i >= 5) {
+                        return Flux.error(new InterruptedException("Solo hasta 5"));
+                    }
+                    return Flux.just(i);
+                })
+                .map(i -> "Hola " + i)
+                //este operador va a intentar ejecutarlo n veces antes de tirar el error
+                .retry(2)
+                .subscribe(s -> log.info(s), e -> log.error(e.getMessage()));
+
+        //queda bloqueado hasta que llegue a cero el contador
+        // como nunca se va a dar es infinito
+        //para finalizarlo hay que detenerlo
+        latch.await();
+    }
+
+    private void ejemploCrearObservableFlux() {
+        Flux.create(emitter -> {
+                    Timer timer = new Timer();
+                    timer.schedule(new TimerTask() {
+                        private Integer contador = 0;
+
+                        @Override
+                        public void run() {
+                            // con el emmiter cada elemento que queremos emitir lo hacemos con el next
+                            emitter.next(++contador);
+                            if (contador == 8){
+                                timer.cancel();
+                                emitter.complete();
+                            }
+                            if(contador == 5){
+                                timer.cancel();
+                                emitter.error(new InterruptedException("Error se ha detenido el flux en 5"));
+                            }
+                        }
+                    }, 500, 1000);
+                })
+                .subscribe(next -> log.info(next.toString()),
+                        error -> log.error(error.getMessage()),
+                        // solo se ejecuta cuando se termina sin error
+                        () -> log.info("Hemos terminado")
+                );
+    }
+
+    private void ejemploContrapresion(){
+        /*
+         la contrapresion le permite al suscriptor avisarle al emisor
+         la cantidad de elementos a enviar por cada vez.
+         en vez de enviarle todo a la vez por ejemplo cada 5 elementos, en lotes
+        */
+
+        Flux.range(0,10)
+                // nos permite ver la traza completa de nuestro flux
+                // unbounded (ilimitada)
+                .log()
+                .subscribe(new Subscriber<Integer>() {
+
+                    private Subscription s;
+                    //para procesar por lotes de a 5 elementos
+                    private Integer limite = 5;
+                    private Integer consumido = 0;
+
+                    @Override
+                    public void onSubscribe(Subscription subscription) {
+                        this.s = subscription;
+                        s.request(limite);
+                    }
+
+                    @Override
+                    public void onNext(Integer i) {
+                        log.info(i.toString());
+                        consumido++;
+                        if(consumido == limite){
+                            consumido = 0;
+                            s.request(limite);
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable throwable) {
+
+                    }
+
+                    @Override
+                    public void onComplete() {
+
+                    }
+                });
+    }
+    private void ejemploContrapresionLimitRate(){
+        Flux.range(0,10)
+                .log()
+                .limitRate(2)
+                .subscribe();
     }
 }
