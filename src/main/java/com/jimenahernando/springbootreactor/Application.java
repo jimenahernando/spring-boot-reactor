@@ -1,6 +1,8 @@
 package com.jimenahernando.springbootreactor;
 
+import com.jimenahernando.springbootreactor.models.Comentarios;
 import com.jimenahernando.springbootreactor.models.Usuario;
+import com.jimenahernando.springbootreactor.models.UsuarioComentarios;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -36,7 +38,10 @@ public class Application implements CommandLineRunner {
 //        ejemploCreoObservableApartirIterable();
 //        ejemploFlatMap();
 //        ejemploConvertirUsuarioAString();
-        ejemploConvertirAMono();
+//        ejemploConvertirAMono();
+//        ejemploCombinarFlujos();
+//        ejemploCombinarConZipWith();
+        ejemploCombinarConZipWith2();
     }
 
     private void primerEjemplo() {
@@ -284,7 +289,7 @@ public class Application implements CommandLineRunner {
         Flux.fromIterable(nombresList)
                 .map(nombre -> new Usuario(nombre.split(" ")[0], nombre.split(" ")[1]))
                 .flatMap(usuario -> {
-                    if(usuario.getApellido().equalsIgnoreCase("Riera")){
+                    if (usuario.getApellido().equalsIgnoreCase("Riera")) {
                         // tiene que devolver un observable, a partir del objeto creamos un observable y lo devolvemos
                         //  fusionandolo al unico string de salida (lo aplana).
                         return Mono.just(usuario);
@@ -302,21 +307,21 @@ public class Application implements CommandLineRunner {
 
     private void ejemploConvertirUsuarioAString() {
         List<Usuario> usuariosList = new ArrayList<>();
-        usuariosList.add(new Usuario("Cecilia","Hernando"));
-        usuariosList.add(new Usuario("Camila","Riera"));
-        usuariosList.add(new Usuario("Luis","Riera"));
-        usuariosList.add(new Usuario("Graciela","Barreira"));
-        usuariosList.add(new Usuario("Jimena","Hernando"));
+        usuariosList.add(new Usuario("Cecilia", "Hernando"));
+        usuariosList.add(new Usuario("Camila", "Riera"));
+        usuariosList.add(new Usuario("Luis", "Riera"));
+        usuariosList.add(new Usuario("Graciela", "Barreira"));
+        usuariosList.add(new Usuario("Jimena", "Hernando"));
 
         Flux.fromIterable(usuariosList)
                 .map(usuario -> usuario.getNombre().toUpperCase().concat(" ").concat(usuario.getApellido().toUpperCase()))
-                        .flatMap(nombre -> {
-                            if(nombre.contains("Jimena".toUpperCase())){
-                                return Mono.just(nombre);
-                            } else {
-                                return Mono.empty();
-                            }
-                        })
+                .flatMap(nombre -> {
+                    if (nombre.contains("Jimena".toUpperCase())) {
+                        return Mono.just(nombre);
+                    } else {
+                        return Mono.empty();
+                    }
+                })
                 .map(String::toLowerCase)
                 .subscribe(log::info);
     }
@@ -324,11 +329,11 @@ public class Application implements CommandLineRunner {
     private void ejemploConvertirAMono() {
         // Mono o collectList
         List<Usuario> usuariosList = new ArrayList<>();
-        usuariosList.add(new Usuario("Cecilia","Hernando"));
-        usuariosList.add(new Usuario("Camila","Riera"));
-        usuariosList.add(new Usuario("Luis","Riera"));
-        usuariosList.add(new Usuario("Graciela","Barreira"));
-        usuariosList.add(new Usuario("Jimena","Hernando"));
+        usuariosList.add(new Usuario("Cecilia", "Hernando"));
+        usuariosList.add(new Usuario("Camila", "Riera"));
+        usuariosList.add(new Usuario("Luis", "Riera"));
+        usuariosList.add(new Usuario("Graciela", "Barreira"));
+        usuariosList.add(new Usuario("Jimena", "Hernando"));
 
         // va recibiendo uno a uno
         Flux.fromIterable(usuariosList)
@@ -345,5 +350,67 @@ public class Application implements CommandLineRunner {
                 // convierte a un flujo
                 .collectList()
                 .subscribe(lista -> lista.forEach(item -> log.info(item.toString())));
+    }
+
+    private void ejemploCombinarFlujos() {
+        // 1era forma llamando a un metodo
+        Mono<Usuario> usuarioMono = Mono.fromCallable(() -> crearUsuario());
+
+        // 2da forma creandolo al vuelo
+        Mono<Usuario> usuarioMonoAlVuelo = Mono.fromCallable(() -> new Usuario("Gisela", "Marozzi"));
+
+        Mono<Comentarios> comentariosAlVuelo = Mono.fromCallable(() -> {
+            Comentarios comentarios = new Comentarios();
+            comentarios.addComentarios("Hola amiga que tal");
+            comentarios.addComentarios("La casa esta preciosa");
+            comentarios.addComentarios("Estoy tomando unos mates pensando en ti");
+            return comentarios;
+        });
+
+        usuarioMonoAlVuelo.flatMap(u -> comentariosAlVuelo.map(c -> new UsuarioComentarios(u, c)))
+                .subscribe(uc -> log.info(uc.toString()));
+    }
+
+    private Usuario crearUsuario() {
+        return new Usuario("Gisela", "Marozzi");
+    }
+
+    private void ejemploCombinarConZipWith() {
+        log.info("INIT ejemploCombinarConZipWith");
+        Mono<Usuario> usuarioMonoAlVuelo = Mono.fromCallable(() -> new Usuario("Gisela", "Marozzi"));
+
+        Mono<Comentarios> comentariosAlVuelo = Mono.fromCallable(() -> {
+            Comentarios comentarios = new Comentarios();
+            comentarios.addComentarios("Hola amiga que tal");
+            comentarios.addComentarios("La casa esta preciosa");
+            comentarios.addComentarios("Estoy tomando unos mates pensando en ti");
+            return comentarios;
+        });
+
+        Mono<UsuarioComentarios> usuariosComentarios = usuarioMonoAlVuelo.zipWith(comentariosAlVuelo, (usuario, comentario) -> new UsuarioComentarios(usuario, comentario));
+        usuariosComentarios.subscribe(uc -> log.info(uc.toString()));
+    }
+
+    private void ejemploCombinarConZipWith2() {
+        // Otra forma de implementar ZipWith
+        log.info("INIT ejemploCombinarConZipWith2");
+        Mono<Usuario> usuarioMonoAlVuelo = Mono.fromCallable(() -> new Usuario("Gisela", "Marozzi"));
+
+        Mono<Comentarios> comentariosAlVuelo = Mono.fromCallable(() -> {
+            Comentarios comentarios = new Comentarios();
+            comentarios.addComentarios("Hola amiga que tal");
+            comentarios.addComentarios("La casa esta preciosa");
+            comentarios.addComentarios("Estoy tomando unos mates pensando en ti");
+            return comentarios;
+        });
+
+        Mono<UsuarioComentarios> usuariosComentarios = usuarioMonoAlVuelo
+                .zipWith(comentariosAlVuelo)
+                .map(tupla -> {
+                    Usuario u = tupla.getT1();
+                    Comentarios c = tupla.getT2();
+                    return new UsuarioComentarios(u,c);
+                });
+        usuariosComentarios.subscribe(uc -> log.info(uc.toString()));
     }
 }
